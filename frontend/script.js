@@ -5,7 +5,7 @@
 // Для Render (замени на свой URL после деплоя):
 const API = window.location.hostname === 'localhost'
     ? 'http://localhost:5000/api'
-    : 'https://ministerstvo-zdravoohraneniya.onrender.com/api';  // <-- Замени после деплоя!
+    const API = 'https://medregistratura-api.onrender.com/api';
 
 let currentUser = null;
 let currentTab = '';
