@@ -1,6 +1,6 @@
 // ==================== КОНФИГУРАЦИЯ ====================
 
-const API = 'https://medregistratura-api.onrender.com/api';
+const API = 'https://official-minzdrav-site.onrender.com/api';
 
 let currentUser = null;
 let currentTab = '';
