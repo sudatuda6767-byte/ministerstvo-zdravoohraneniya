@@ -5,7 +5,7 @@
 // Для Render (замени на свой URL после деплоя):
 const API = window.location.hostname === 'localhost'
     ? 'http://localhost:5000/api'
-    : 'https://YOUR-BACKEND-NAME.onrender.com/api';  // <-- Замени после деплоя!
+    : 'https://ministerstvo-zdravoohraneniya.onrender.com/api';  // <-- Замени после деплоя!
 
 let currentUser = null;
 let currentTab = '';
