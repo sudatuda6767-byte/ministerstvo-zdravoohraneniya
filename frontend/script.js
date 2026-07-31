@@ -1,11 +1,6 @@
 // ==================== КОНФИГУРАЦИЯ ====================
 
-// Для локальной разработки:
-// const API = 'http://localhost:5000/api';
-// Для Render (замени на свой URL после деплоя):
-const API = window.location.hostname === 'localhost'
-    ? 'http://localhost:5000/api'
-    const API = 'https://medregistratura-api.onrender.com/api';
+const API = 'https://medregistratura-api.onrender.com/api';
 
 let currentUser = null;
 let currentTab = '';
@@ -116,13 +111,11 @@ function showMainScreen() {
     document.getElementById('auth-screen').classList.remove('active');
     document.getElementById('main-screen').classList.add('active');
 
-    // Информация о пользователе
     const roleNames = { admin: 'Администратор', registrar: 'Регистратура', citizen: 'Пациент' };
     const roleClass = `role-${currentUser.role}`;
     document.getElementById('user-info').innerHTML =
         `${currentUser.full_name} <span class="role-badge ${roleClass}">${roleNames[currentUser.role]}</span>`;
 
-    // Навигация по роли
     buildNavigation();
 }
 
@@ -160,19 +153,16 @@ function buildNavigation() {
         `<div class="nav-tab" data-tab="${t.id}" onclick="switchTab('${t.id}')">${t.label}</div>`
     ).join('');
 
-    // Активируем первую вкладку
     switchTab(tabs[0].id);
 }
 
 function switchTab(tabId) {
     currentTab = tabId;
 
-    // Обновляем навигацию
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     const activeTab = document.querySelector(`.nav-tab[data-tab="${tabId}"]`);
     if (activeTab) activeTab.classList.add('active');
 
-    // Загружаем контент
     switch (tabId) {
         case 'new-appointment': loadNewAppointmentForm(); break;
         case 'my-appointments': loadMyAppointments(); break;
@@ -194,7 +184,6 @@ async function loadNewAppointmentForm() {
         const data = await res.json();
         const doctors = data.doctors || [];
 
-        // Минимальная дата — завтра
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
         const minDate = tomorrow.toISOString().split('T')[0];
@@ -414,7 +403,6 @@ async function loadAppointments(statusFilter) {
             return;
         }
 
-        // Фильтры (только для "все заявки")
         let filtersHtml = '';
         if (!statusFilter) {
             filtersHtml = `
@@ -490,7 +478,6 @@ async function loadAppointments(statusFilter) {
 }
 
 function filterAppointments(status) {
-    // Клиентская фильтрация
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     event.target.classList.add('active');
 
@@ -503,7 +490,6 @@ function filterAppointments(status) {
     });
 }
 
-// Модалка одобрения
 function openApproveModal(id, defaultDate, defaultTime) {
     const modal = document.getElementById('modal-content');
     modal.innerHTML = `
@@ -531,7 +517,6 @@ function openApproveModal(id, defaultDate, defaultTime) {
     document.getElementById('modal-overlay').style.display = 'flex';
 }
 
-// Модалка отклонения
 function openRejectModal(id) {
     const modal = document.getElementById('modal-content');
     modal.innerHTML = `
@@ -603,7 +588,6 @@ function closeModal() {
     document.getElementById('modal-overlay').style.display = 'none';
 }
 
-// Закрытие модалки по клику на оверлей
 document.getElementById('modal-overlay').addEventListener('click', function (e) {
     if (e.target === this) closeModal();
 });
