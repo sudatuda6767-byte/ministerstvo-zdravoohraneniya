@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Отдел Кадров</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0d0d1a;color:#e0e0e0;min-height:100vh}
+
+/* ── AUTH ── */
+.auth-screen{position:fixed;inset:0;background:linear-gradient(135deg,#0a0a15,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:center;z-index:9999}
+.auth-box{background:#1a1a2e;border:1px solid #2a2a45;border-radius:16px;padding:40px;width:420px;max-width:94vw;box-shadow:0 24px 64px rgba(0,0,0,.6)}
+.auth-box h2{text-align:center;margin-bottom:24px;color:#7c83ff;font-size:22px;letter-spacing:.5px}
+.auth-box input,.auth-box select{width:100%;padding:11px 14px;margin-bottom:10px;background:#0d0d1a;border:1px solid #2a2a45;border-radius:8px;color:#e0e0e0;font-size:14px;outline:none;transition:border .25s}
+.auth-box input:focus,.auth-box select:focus{border-color:#7c83ff}
+.auth-box select option{background:#1a1a2e}
+.auth-btn{width:100%;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:transform .2s,box-shadow .2s;margin-top:4px}
+.auth-btn:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(102,126,234,.4)}
+.auth-toggle{text-align:center;margin-top:14px;color:#888;font-size:13px}
+.auth-toggle a{color:#7c83ff;cursor:pointer;text-decoration:underline}
+.auth-err{background:#c0392b;color:#fff;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;display:none}
+
+/* ── LAYOUT ── */
+.app{display:none;flex-direction:column;min-height:100vh}
+.topbar{background:#13132a;border-bottom:1px solid #2a2a45;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.topbar .logo{font-size:18px;font-weight:700;color:#7c83ff;letter-spacing:.5px}
+.topbar .uinfo{display:flex;align-items:center;gap:10px;font-size:13px}
+.role-badge{background:#7c83ff22;color:#7c83ff;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.btn-logout{background:#c0392b;border:none;color:#fff;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600}
+
+.main{display:flex;flex:1;overflow:hidden}
+
+/* ── SIDEBAR ── */
+.sidebar{width:230px;background:#10101f;border-right:1px solid #2a2a45;padding:12px 0;flex-shrink:0;overflow-y:auto}
+.nav-item{padding:13px 22px;cursor:pointer;font-size:13px;border-left:3px solid transparent;transition:all .2s;display:flex;align-items:center;gap:8px}
+.nav-item:hover{background:#1a1a30}
+.nav-item.active{background:#1a1a30;border-left-color:#7c83ff;color:#7c83ff}
+
+/* ── CONTENT ── */
+.content{flex:1;padding:24px;overflow-y:auto}
+.page{display:none}
+.page.active{display:block}
+.page-title{font-size:22px;font-weight:700;color:#7c83ff;margin-bottom:20px}
+
+/* ── CARDS ── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:#1a1a2e;border-radius:10px;padding:22px;text-align:center;border:1px solid #2a2a45}
+.stat-card .num{font-size:38px;font-weight:800;margin-bottom:4px}
+.stat-card .lbl{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.5px}
+
+/* ── BUTTONS ── */
+.btn{padding:9px 18px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;transition:all .2s}
+.btn:hover{transform:translateY(-1px)}
+.btn-primary{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff}
+.btn-success{background:#00c853;color:#fff}
+.btn-danger{background:#c0392b;color:#fff}
+.btn-warn{background:#e67e22;color:#fff}
+.btn-sm{padding:5px 11px;font-size:12px}
+
+/* ── FORMS ── */
+.form-wrap{background:#1a1a2e;border:1px solid #2a2a45;border-radius:12px;padding:24px;max-width:820px;margin-bottom:20px}
+.form-wrap h3{margin-bottom:16px;color:#7c83ff;font-size:15px;text-transform:uppercase;letter-spacing:.5px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg.full{grid-column:span 2}
+.fg label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px}
+.fg input,.fg textarea,.fg select{padding:10px 12px;background:#0d0d1a;border:1px solid #2a2a45;border-radius:7px;color:#e0e0e0;font-size:13px;outline:none;transition:border .25s}
+.fg input:focus,.fg textarea:focus{border-color:#7c83ff}
+
+/* ── FILE DROP ── */
+.file-zone{border:2px dashed #2a2a45;border-radius:9px;padding:18px;text-align:center;cursor:pointer;position:relative;transition:border-color .25s;min-height:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.file-zone:hover,.file-zone.over{border-color:#7c83ff}
+.file-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.file-zone img{max-width:100%;max-height:110px;border-radius:6px;border:1px solid #2a2a45}
+.file-zone .hint{color:#666;font-size:12px}
+
+/* ── TABLE ── */
+.tbl-wrap{overflow-x:auto;margin-top:14px;border-radius:10px;border:1px solid #2a2a45}
+table{width:100%;border-collapse:collapse;background:#1a1a2e;font-size:12px}
+th{background:#1e1e38;color:#888;text-transform:uppercase;font-size:10px;letter-spacing:.5px;padding:11px 10px;text-align:left;white-space:nowrap}
+td{padding:9px 10px;border-top:1px solid #23233a;vertical-align:top}
+tr:hover td{background:#1d1d33}
+
+/* ── CHECKBOX ── */
+.chk{display:flex;align-items:center;gap:6px}
+.chk input[type=checkbox]{width:17px;height:17px;accent-color:#7c83ff;cursor:pointer}
+
+/* ── APP CARDS ── */
+.app-card{background:#1a1a2e;border-radius:10px;padding:20px;margin-bottom:14px;border-left:4px solid #e67e22;border:1px solid #2a2a45;border-left-width:4px}
+.app-card.approved{border-left-color:#00c853}
+.app-card.rejected{border-left-color:#c0392b}
+.app-case{font-size:17px;font-weight:800;color:#7c83ff;margin-bottom:10px}
+.app-fields{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;margin-bottom:10px}
+.app-field{font-size:12px}
+.app-field b{color:#888;display:block;font-size:10px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:1px}
+.docs-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.doc-thumb img{max-width:130px;max-height:90px;border-radius:6px;border:1px solid #2a2a45;cursor:pointer;transition:transform .2s}
+.doc-thumb img:hover{transform:scale(1.08)}
+.doc-thumb span{display:block;font-size:10px;color:#888;margin-top:2px;text-align:center}
+.app-status-bar{padding:10px 14px;border-radius:7px;font-size:13px;font-weight:600;margin-top:10px}
+.app-status-bar.pending{background:#e67e2222;color:#e67e22}
+.app-status-bar.approved{background:#00c85322;color:#00c853}
+.app-status-bar.rejected{background:#c0392b22;color:#c0392b}
+
+/* ── MODAL IMG ── */
+.img-modal{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;display:none;align-items:center;justify-content:center;cursor:zoom-out}
+.img-modal.open{display:flex}
+.img-modal img{max-width:92vw;max-height:92vh;border-radius:8px}
+
+/* ── NOTIFY ── */
+.notify{position:fixed;top:18px;right:18px;padding:13px 18px;border-radius:9px;color:#fff;font-size:13px;z-index:99999;transform:translateX(130%);transition:transform .3s;max-width:480px;line-height:1.4;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.notify.show{transform:translateX(0)}
+.notify.ok{background:#00c853}
+.notify.err{background:#c0392b}
+.notify.warn{background:#e67e22}
+
+@media(max-width:700px){
+  .main{flex-direction:column}
+  .sidebar{width:100%;display:flex;overflow-x:auto;padding:0;border-right:none;border-bottom:1px solid #2a2a45}
+  .nav-item{border-left:none;border-bottom:3px solid transparent;white-space:nowrap;padding:11px 14px}
+  .nav-item.active{border-bottom-color:#7c83ff;border-left-color:transparent}
+  .form-grid{grid-template-columns:1fr}
+  .fg.full{grid-column:span 1}
+}
+</style>
+</head>
+<body>
+
+<div class="notify" id="notify"></div>
+<div class="img-modal" id="imgModal" onclick="this.classList.remove('open')">
+  <img id="imgModalSrc" src="" alt="">
+</div>
+
+<!-- ════ AUTH ════ -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-box">
+    <h2 id="authTitle">Вход в систему</h2>
+    <div class="auth-err" id="authErr"></div>
+
+    <div id="fLogin">
+      <input id="lLogin" placeholder="Логин" autocomplete="username">
+      <input id="lPass"  placeholder="Пароль" type="password" autocomplete="current-password">
+      <button class="auth-btn" onclick="doLogin()">Войти</button>
+      <div class="auth-toggle">Нет аккаунта? <a onclick="toggleAuth(true)">Регистрация</a></div>
+    </div>
+
+    <div id="fReg" style="display:none">
+      <input id="rLogin"    placeholder="Логин" autocomplete="username">
+      <input id="rPass"     placeholder="Пароль" type="password" autocomplete="new-password">
+      <input id="rNickname" placeholder="Никнейм  напр: [Зав. ОК] Иванов И.И.">
+      <select id="rRole">
+        <option value="Сотрудник">Сотрудник</option>
+        <option value="Сотрудник ОК">Сотрудник ОК</option>
+        <option value="Заместитель Заведующего ОК">Заместитель Заведующего ОК</option>
+        <option value="Заведующий ОК">Заведующий ОК</option>
+        <option value="Заместитель Заведующего АБ">Заместитель Заведующего АБ</option>
+        <option value="Заведующий АБ">Заведующий АБ</option>
+        <option value="Заместитель Главного Врача">Заместитель Главного Врача</option>
+        <option value="Главный Врач">Главный Врач</option>
+      </select>
+      <button class="auth-btn" onclick="doRegister()">Зарегистрироваться</button>
+      <div class="auth-toggle">Есть аккаунт? <a onclick="toggleAuth(false)">Войти</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ APP ════ -->
+<div class="app" id="appWrap">
+  <div class="topbar">
+    <div class="logo">⚕ Система ОК</div>
+    <div class="uinfo">
+      <span id="uNick"></span>
+      <span class="role-badge" id="uRole"></span>
+      <button class="btn-logout" onclick="doLogout()">Выйти</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="sidebar" id="sidebar">
+      <div class="nav-item active" data-page="dashboard">📊 Главная</div>
+      <div class="nav-item" data-page="blacklist">🚫 Чёрный список</div>
+      <div class="nav-item" data-page="applications">📋 Анкеты</div>
+      <div class="nav-item" data-page="newapp">➕ Новая анкета</div>
+    </div>
+
+    <div class="content">
+
+      <!-- DASHBOARD -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-title">📊 Главная</div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="num" id="sBL"  style="color:#c0392b">0</div><div class="lbl">В ЧС</div></div>
+          <div class="stat-card"><div class="num" id="sPend" style="color:#e67e22">0</div><div class="lbl">На рассмотрении</div></div>
+          <div class="stat-card"><div class="num" id="sApp"  style="color:#00c853">0</div><div class="lbl">Одобрено</div></div>
+          <div class="stat-card"><div class="num" id="sRej"  style="color:#c0392b">0</div><div class="lbl">Отклонено</div></div>
+        </div>
+        <p style="color:#555;font-size:13px">Все решения по анкетам принимаются через Discord-бота.</p>
+      </div>
+
+      <!-- BLACKLIST -->
+      <div class="page" id="page-blacklist">
+        <div class="page-title">🚫 Чёрный список</div>
+
+        <div id="blFormWrap" style="display:none">
+          <div class="form-wrap">
+            <h3>Добавить в ЧС</h3>
+            <div class="form-grid">
+              <div class="fg"><label>Ф.И.О.</label><input id="bFio"></div>
+              <div class="fg"><label>До (дата)</label><input id="bUntil" type="date"></div>
+              <div class="fg full"><label>Причина</label><textarea id="bReason" rows="2" style="background:#0d0d1a;border:1px solid #2a2a45;border-radius:7px;color:#e0e0e0;padding:10px;font-size:13px;resize:vertical"></textarea></div>
+              <div class="fg"><label>Сумма за вынос</label><input id="bFee"></div>
+              <div class="fg"><label>Действие для выноса</label><input id="bAction"></div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:10px">
+              <button class="btn btn-danger" onclick="addBL()">Добавить в ЧС</button>
+              <button class="btn" style="background:#2a2a45;color:#aaa" onclick="closeBLForm()">Отмена</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px" id="blAddBtnWrap" style="display:none">
+          <button class="btn btn-danger" id="blAddBtn" onclick="openBLForm()">+ Добавить в ЧС</button>
+        </div>
+
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Ф.И.О.</th>
+                <th>Дата внесения</th>
+                <th>До</th>
+                <th>Причина</th>
+                <th>Кто внёс</th>
+                <th>Сумма за вынос</th>
+                <th>Действие для выноса</th>
+                <th>ЧС снят</th>
+                <th>Кем снят</th>
+                <th>Амнистирован</th>
+                <th>Кем амнистирован</th>
+              </tr>
+            </thead>
+            <tbody id="blTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- APPLICATIONS -->
+      <div class="page" id="page-applications">
+        <div class="page-title">📋 Анкеты на принятие</div>
+        <p style="color:#666;font-size:12px;margin-bottom:16px">Решения принимаются через Discord-бота (кнопки ✅ / ❌ в канале).</p>
+        <div id="appList"></div>
+      </div>
+
+      <!-- NEW APP -->
+      <div class="page" id="page-newapp">
+        <div class="page-title">➕ Новая анкета</div>
+        <div class="form-wrap">
+          <h3>Личное дело — форма подачи</h3>
+          <div class="form-grid">
+            <div class="fg full"><label>Фамилия Имя Отчество *</label><input id="aFio"></div>
+            <div class="fg"><label>Номер телефона</label><input id="aPhone"></div>
+            <div class="fg"><label>Специальная связь</label><input id="aComm"></div>
+            <div class="fg"><label>Спец. ID-идентификация</label><input id="aSpecId"></div>
+            <div class="fg"><label>Дата и время собеседования</label><input id="aIntDate" type="datetime-local"></div>
+            <div class="fg"><label>Ответственный за собеседование</label><input id="aIntResp"></div>
+            <div class="fg full"><label>Ответственный по принятию</label><input id="aAccResp"></div>
+          </div>
+
+          <h3 style="margin-top:20px">Документы</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:10px">
+            <div>
+              <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Паспорт</div>
+              <div class="file-zone" id="dzPassport"
+                ondragover="dzOver(event,this)" ondragleave="this.classList.remove('over')"
+                ondrop="dzDrop(event,'passport')">
+                <input type="file" accept="image/*" onchange="dzFile(this,'passport')">
+                <span class="hint">📎 Файл / Ctrl+V / перетащи</span>
+                <img id="prvPassport" style="display:none" onclick="showImg(this.src);event.stopPropagation()">
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Лицензии</div>
+              <div class="file-zone" id="dzLicense"
+                ondragover="dzOver(event,this)" ondragleave="this.classList.remove('over')"
+                ondrop="dzDrop(event,'license')">
+                <input type="file" accept="image/*" onchange="dzFile(this,'license')">
+                <span class="hint">📎 Файл / Ctrl+V / перетащи</span>
+                <img id="prvLicense" style="display:none" onclick="showImg(this.src);event.stopPropagation()">
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Медицинская карта</div>
+              <div class="file-zone" id="dzMedcard"
+                ondragover="dzOver(event,this)" ondragleave="this.classList.remove('over')"
+                ondrop="dzDrop(event,'medcard')">
+                <input type="file" accept="image/*" onchange="dzFile(this,'medcard')">
+                <span class="hint">📎 Файл / Ctrl+V / перетащи</span>
+                <img id="prvMedcard" style="display:none" onclick="showImg(this.src);event.stopPropagation()">
+              </div>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" style="margin-top:22px;width:100%;justify-content:center;font-size:15px" onclick="submitApp()">
+            📨 Отправить анкету
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<script>
+// ════════════════════════════════════
+// STATE
+// ════════════════════════════════════
+let ME = null;
+const uploads = { passport:'', license:'', medcard:'' };
+let lastHoveredDZ = 'passport';
+
+const BL_SITE_ROLES = ['Заведующий ОК','Заместитель Заведующего ОК','Заведующий АБ','Заместитель Заведующего АБ','Заместитель Главного Врача','Главный Врач'];
+
+// ════════════════════════════════════
+// NOTIFY
+// ════════════════════════════════════
+function notify(msg, type='ok') {
+  const el = document.getElementById('notify');
+  el.textContent = msg;
+  el.className = `notify ${type} show`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 6000);
+}
+
+// ════════════════════════════════════
+// UTILS
+// ════════════════════════════════════
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function showImg(src) {
+  document.getElementById('imgModalSrc').src = src;
+  document.getElementById('imgModal').classList.add('open');
+}
+async function apiFetch(url, opts={}) {
+  const r = await fetch(url, opts);
+  const d = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, data: d };
+}
+
+// ════════════════════════════════════
+// AUTH
+// ════════════════════════════════════
+function toggleAuth(showReg) {
+  document.getElementById('fLogin').style.display = showReg ? 'none' : 'block';
+  document.getElementById('fReg').style.display   = showReg ? 'block' : 'none';
+  document.getElementById('authTitle').textContent = showReg ? 'Регистрация' : 'Вход в систему';
+  document.getElementById('authErr').style.display = 'none';
+}
+function setAuthErr(msg) {
+  const el = document.getElementById('authErr');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function doLogin() {
+  const { ok, data } = await apiFetch('/api/login', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ login: document.getElementById('lLogin').value, password: document.getElementById('lPass').value })
+  });
+  if (!ok) return setAuthErr(data.error || 'Ошибка');
+  await bootApp();
+}
+
+async function doRegister() {
+  const { ok, data } = await apiFetch('/api/register', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      login:    document.getElementById('rLogin').value,
+      password: document.getElementById('rPass').value,
+      nickname: document.getElementById('rNickname').value,
+      role:     document.getElementById('rRole').value
+    })
+  });
+  if (!ok) return setAuthErr(data.error || 'Ошибка');
+  await bootApp();
+}
+
+async function doLogout() {
+  await apiFetch('/api/logout', { method:'POST' });
+  ME = null;
+  document.getElementById('authScreen').style.display = 'flex';
+  document.getElementById('appWrap').style.display    = 'none';
+}
+
+async function bootApp() {
+  const { ok, data } = await apiFetch('/api/me');
+  if (!ok) { document.getElementById('authScreen').style.display='flex'; return; }
+  ME = data;
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appWrap').style.display    = 'flex';
+  document.getElementById('uNick').textContent = ME.nickname;
+  document.getElementById('uRole').textContent = ME.role;
+
+  // показать кнопку добавления в ЧС только уполномоченным
+  document.getElementById('blAddBtnWrap').style.display =
+    BL_SITE_ROLES.includes(ME.role) ? 'block' : 'none';
+
+  await Promise.all([loadDash(), loadBL(), loadApps()]);
+}
+
+// ════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════
+document.getElementById('sidebar').addEventListener('click', e => {
+  const item = e.target.closest('.nav-item');
+  if (!item) return;
+  const pg = item.dataset.page;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  item.classList.add('active');
+  document.getElementById('page-' + pg).classList.add('active');
+  if (pg === 'blacklist')    loadBL();
+  if (pg === 'applications') loadApps();
+  if (pg === 'dashboard')    loadDash();
+});
+
+// ════════════════════════════════════
+// DASHBOARD
+// ════════════════════════════════════
+async function loadDash() {
+  const [r1, r2] = await Promise.all([apiFetch('/api/blacklist'), apiFetch('/api/applications')]);
+  if (r1.ok) {
+    document.getElementById('sBL').textContent =
+      r1.data.filter(b => !b.is_removed && !b.is_amnestied).length;
+  }
+  if (r2.ok) {
+    document.getElementById('sPend').textContent = r2.data.filter(a => a.status==='pending').length;
+    document.getElementById('sApp').textContent  = r2.data.filter(a => a.status==='approved').length;
+    document.getElementById('sRej').textContent  = r2.data.filter(a => a.status==='rejected').length;
+  }
+}
+
+// ════════════════════════════════════
+// BLACKLIST
+// ════════════════════════════════════
+function openBLForm()  { document.getElementById('blFormWrap').style.display='block'; document.getElementById('blAddBtnWrap').style.display='none'; }
+function closeBLForm() { document.getElementById('blFormWrap').style.display='none';  document.getElementById('blAddBtnWrap').style.display=BL_SITE_ROLES.includes(ME?.role)?'block':'none'; }
+
+async function loadBL() {
+  const { ok, data } = await apiFetch('/api/blacklist');
+  if (!ok) return;
+  const canEdit = BL_SITE_ROLES.includes(ME?.role);
+  const tbody   = document.getElementById('blTbody');
+  tbody.innerHTML = data.map((b, i) => `
+    <tr>
+      <td>${data.length - i}</td>
+      <td><b>${esc(b.fio)}</b></td>
+      <td>${esc(b.date_added)}</td>
+      <td>${esc(b.date_until)||'—'}</td>
+      <td style="max-width:200px;word-break:break-word">${esc(b.reason)}</td>
+      <td>${esc(b.added_by_role)}<br><b>${esc(b.added_by_fio)}</b></td>
+      <td>${esc(b.removal_fee)||'—'}</td>
+      <td>${esc(b.removal_action)||'—'}</td>
+      <td>
+        <div class="chk">
+          <input type="checkbox" ${b.is_removed?'checked disabled':(!canEdit?'disabled':'')}
+            ${!b.is_removed&&canEdit?`onchange="blRemove(${b.id},this)"`:''}>
+        </div>
+        ${b.is_removed?'<span style="font-size:10px;color:#00c853">Снят</span>':''}
+      </td>
+      <td>${b.is_removed?`${esc(b.removed_by_role)}<br><b>${esc(b.removed_by_fio)}</b><br><span style="font-size:10px;color:#888">${esc(b.removed_at)}</span>`:'—'}</td>
+      <td>
+        <div class="chk">
+          <input type="checkbox" ${b.is_amnestied?'checked disabled':(!canEdit?'disabled':'')}
+            ${!b.is_amnestied&&canEdit?`onchange="blAmnesty(${b.id},this)"`:''}>
+        </div>
+        ${b.is_amnestied?'<span style="font-size:10px;color:#7c83ff">Амнистирован</span>':''}
+      </td>
+      <td>${b.is_amnestied?`${esc(b.amnestied_by_role)}<br><b>${esc(b.amnestied_by_fio)}</b><br><span style="font-size:10px;color:#888">${esc(b.amnestied_at)}</span>`:'—'}</td>
+    </tr>`).join('');
+}
+
+async function addBL() {
+  const fio = document.getElementById('bFio').value.trim();
+  const reason = document.getElementById('bReason').value.trim();
+  if (!fio || !reason) return notify('Заполни ФИО и причину!','warn');
+  const { ok, data } = await apiFetch('/api/blacklist',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      fio, reason,
+      date_until:    document.getElementById('bUntil').value,
+      removal_fee:   document.getElementById('bFee').value,
+      removal_action:document.getElementById('bAction').value
+    })
+  });
+  if (!ok) return notify(data.error||'Ошибка','err');
+  notify('Добавлено в ЧС!');
+  closeBLForm();
+  ['bFio','bUntil','bReason','bFee','bAction'].forEach(id => document.getElementById(id).value='');
+  await loadBL();
+}
+
+async function blRemove(id, chk) {
+  if (!confirm('Подтвердить снятие ЧС?')) { chk.checked=false; return; }
+  const { ok, data } = await apiFetch(`/api/blacklist/${id}/remove`,{method:'PUT'});
+  if (!ok) { chk.checked=false; return notify(data.error||'Ошибка','err'); }
+  notify('ЧС снят!');
+  loadBL();
+}
+
+async function blAmnesty(id, chk) {
+  if (!confirm('Подтвердить амнистию?')) { chk.checked=false; return; }
+  const { ok, data } = await apiFetch(`/api/blacklist/${id}/amnesty`,{method:'PUT'});
+  if (!ok) { chk.checked=false; return notify(data.error||'Ошибка','err'); }
+  notify('Амнистия применена!');
+  loadBL();
+}
+
+// ════════════════════════════════════
+// FILE ZONES
+// ════════════════════════════════════
+function dzOver(e, el) { e.preventDefault(); el.classList.add('over'); lastHoveredDZ = el.id.replace('dz','').toLowerCase(); }
+function dzDrop(e, type) { e.preventDefault(); e.currentTarget.classList.remove('over'); if(e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], type); }
+function dzFile(inp, type) { if(inp.files[0]) uploadFile(inp.files[0], type); }
+
+async function uploadFile(file, type) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { ok, data } = await apiFetch('/api/upload',{ method:'POST', body:fd });
+  if (!ok) return notify(data.error||'Ошибка загрузки','err');
+  uploads[type] = data.url;
+  const cap  = type.charAt(0).toUpperCase() + type.slice(1);
+  const prev = document.getElementById('prv' + cap);
+  prev.src = data.url;
+  prev.style.display = 'block';
+  notify('Файл загружен ✓');
+}
+
+// Ctrl+V paste
+document.addEventListener('paste', e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      // Определяем тип по последнему наведению
+      let type = 'passport';
+      if (document.getElementById('dzLicense').matches(':hover'))  type = 'license';
+      if (document.getElementById('dzMedcard').matches(':hover'))  type = 'medcard';
+      if (document.getElementById('dzPassport').matches(':hover')) type = 'passport';
+      uploadFile(file, type);
+      break;
+    }
+  }
+});
+
+// ════════════════════════════════════
+// APPLICATIONS
+// ════════════════════════════════════
+async function submitApp() {
+  const fio = document.getElementById('aFio').value.trim();
+  if (!fio) return notify('Введи ФИО!','warn');
+
+  const body = {
+    fio,
+    phone:                 document.getElementById('aPhone').value,
+    special_comm:          document.getElementById('aComm').value,
+    special_id:            document.getElementById('aSpecId').value,
+    interview_datetime:    document.getElementById('aIntDate').value,
+    interview_responsible: document.getElementById('aIntResp').value,
+    acceptance_responsible:document.getElementById('aAccResp').value,
+    passport_url:  uploads.passport,
+    license_url:   uploads.license,
+    medcard_url:   uploads.medcard
+  };
+
+  const { ok, data } = await apiFetch('/api/applications',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+
+  if (!ok) return notify(data.error || 'Ошибка', data.blacklisted ? 'warn' : 'err');
+  notify(`Анкета ${data.case_number} отправлена! Ожидайте решения в Discord.`);
+
+  // сброс
+  ['aFio','aPhone','aComm','aSpecId','aIntDate','aIntResp','aAccResp'].forEach(id => document.getElementById(id).value='');
+  uploads.passport = uploads.license = uploads.medcard = '';
+  ['prvPassport','prvLicense','prvMedcard'].forEach(id => { const el=document.getElementById(id); el.style.display='none'; el.src=''; });
+
+  // переключиться на список
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelector('[data-page="applications"]').classList.add('active');
+  document.getElementById('page-applications').classList.add('active');
+  await loadApps();
+}
+
+async function loadApps() {
+  const { ok, data } = await apiFetch('/api/applications');
+  if (!ok) return;
+  const list = document.getElementById('appList');
+  if (!data.length) { list.innerHTML='<p style="color:#555;font-size:13px">Анкет пока нет.</p>'; return; }
+
+  list.innerHTML = data.map(a => {
+    const cls   = a.status === 'approved' ? 'approved' : a.status === 'rejected' ? 'rejected' : '';
+    const slbl  = a.status === 'approved' ? '✅ Одобрено' : a.status === 'rejected' ? '❌ Отклонено' : '🟠 На рассмотрении';
+
+    let docs = '';
+    if (a.passport_url) docs += `<div class="doc-thumb"><img src="${esc(a.passport_url)}" alt="Паспорт" onclick="showImg('${esc(a.passport_url)}')"><span>Паспорт</span></div>`;
+    if (a.license_url)  docs += `<div class="doc-thumb"><img src="${esc(a.license_url)}"  alt="Лицензии" onclick="showImg('${esc(a.license_url)}')"><span>Лицензии</span></div>`;
+    if (a.medcard_url)  docs += `<div class="doc-thumb"><img src="${esc(a.medcard_url)}"  alt="Мед. карта" onclick="showImg('${esc(a.medcard_url)}')"><span>Мед. карта</span></div>`;
+
+    let stamp = '';
+    if (a.status !== 'pending' && a.decided_by_role) {
+      const verb = a.status === 'approved' ? 'Одобрено' : 'Отклонено';
+      stamp = `<div style="margin-top:10px;padding:10px 14px;background:#0d0d1a;border-radius:7px;font-size:12px;font-style:italic;color:#aaa">
+        ${verb}: ${esc(a.decided_by_role)} ${esc(a.decided_by_fio)} — ${esc(a.decided_at)}
+        ${a.status==='rejected'&&a.reject_reason?`<br>Причина: ${esc(a.reject_reason)}`:''}
+      </div>`;
+    }
+
+    return `<div class="app-card ${cls}">
+      <div class="app-case">${esc(a.case_number)}</div>
+      <div class="app-fields">
+        <div class="app-field"><b>Ф.И.О.</b>${esc(a.fio)}</div>
+        <div class="app-field"><b>Телефон</b>${esc(a.phone)||'—'}</div>
+        <div class="app-field"><b>Спец. связь</b>${esc(a.special_comm)||'—'}</div>
+        <div class="app-field"><b>Спец. ID</b>${esc(a.special_id)||'—'}</div>
+        <div class="app-field"><b>Собеседование</b>${esc(a.interview_datetime)||'—'}</div>
+        <div class="app-field"><b>Отв. собеседование</b>${esc(a.interview_responsible)||'—'}</div>
+        <div class="app-field"><b>Отв. принятие</b>${esc(a.acceptance_responsible)||'—'}</div>
+        <div class="app-field"><b>Подал</b>${esc(a.submitted_by_role)} ${esc(a.submitted_by_fio)}</div>
+        <div class="app-field"><b>Создано</b>${esc(a.created_at)}</div>
+      </div>
+      ${docs?`<div class="docs-row">${docs}</div>`:''}
+      <div class="app-status-bar ${a.status}">${slbl}</div>
+      ${stamp}
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════
+// INIT
+// ════════════════════════════════════
+bootApp();
+
+// Авто-обновление анкет раз в 30 сек
+setInterval(() => {
+  if (ME && document.getElementById('page-applications').classList.contains('active')) loadApps();
+  if (ME && document.getElementById('page-dashboard').classList.contains('active'))    loadDash();
+}, 30000);
+</script>
+</body>
+</html>
