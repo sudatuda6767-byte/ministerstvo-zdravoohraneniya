@@ -1,13 +1,12 @@
 'use strict';
 
 const express = require('express');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
+const crypto = require('crypto');
 
 const {
   Client, GatewayIntentBits, REST, Routes,
@@ -18,12 +17,13 @@ const {
 // ─── ENV ────────────────────────────────────
 const PORT                     = process.env.PORT || 3000;
 const JWT_SECRET               = process.env.JWT_SECRET || 'change_me_jwt';
+const DATABASE_URL             = process.env.DATABASE_URL || '';
 const DISCORD_TOKEN            = process.env.DISCORD_TOKEN || '';
 const DISCORD_CLIENT_ID        = process.env.DISCORD_CLIENT_ID || '';
 const DISCORD_GUILD_ID         = process.env.DISCORD_GUILD_ID || '';
 const APPLICATIONS_CHANNEL_ID  = process.env.APPLICATIONS_CHANNEL_ID || '';
 const BLACKLIST_LOG_CHANNEL_ID = process.env.BLACKLIST_LOG_CHANNEL_ID || '';
-const BASE_URL                 = process.env.BASE_URL || `http://localhost:${PORT}`;
+const BASE_URL                 = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 
 const ROLE_IDS = {
   ZAV_OK:     process.env.ROLE_ZAV_OK_ID     || '',
@@ -37,115 +37,122 @@ const ROLE_IDS = {
 const BL_ALLOWED_ROLES   = Object.values(ROLE_IDS).filter(Boolean);
 const APP_DECISION_ROLES = [ROLE_IDS.ZAV_OK, ROLE_IDS.ZAM_ZAV_OK].filter(Boolean);
 
-// ─── UPLOADS ────────────────────────────────
-if (!fs.existsSync('uploads')) fs.mkdirSync('uploads');
+// ─── POSTGRES ───────────────────────────────
+if (!DATABASE_URL) {
+  console.error('❌ Нет DATABASE_URL. Задай на Render в Environment.');
+  process.exit(1);
+}
 
-const storage = multer.diskStorage({
-  destination: (_r, _f, cb) => cb(null, 'uploads/'),
-  filename: (_r, file, cb) => {
-    const ext = path.extname(file.originalname) || '.png';
-    cb(null, Date.now() + '_' + Math.random().toString(36).slice(2) + ext);
-  }
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
-const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } });
 
-// ─── DATABASE ───────────────────────────────
-const db = new Database('hr.db');
-db.pragma('journal_mode = WAL');
+async function q(text, params = []) {
+  const res = await pool.query(text, params);
+  return res.rows;
+}
+async function qOne(text, params = []) {
+  const rows = await q(text, params);
+  return rows[0] || null;
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    login TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    nickname TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'Сотрудник',
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS blacklist (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fio TEXT NOT NULL,
-    fio_norm TEXT NOT NULL,
-    date_added TEXT NOT NULL,
-    date_until TEXT,
-    reason TEXT NOT NULL,
-    added_by_role TEXT NOT NULL,
-    added_by_fio TEXT NOT NULL,
-    added_by_user_id INTEGER,
-    removal_fee TEXT,
-    removal_action TEXT,
-    is_removed INTEGER DEFAULT 0,
-    removed_at TEXT,
-    removed_by_role TEXT,
-    removed_by_fio TEXT,
-    removed_by_user_id INTEGER,
-    is_amnestied INTEGER DEFAULT 0,
-    amnestied_at TEXT,
-    amnestied_by_role TEXT,
-    amnestied_by_fio TEXT,
-    amnestied_by_user_id INTEGER
-  );
-  CREATE TABLE IF NOT EXISTS applications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    case_number TEXT NOT NULL,
-    fio TEXT NOT NULL,
-    fio_norm TEXT NOT NULL,
-    phone TEXT,
-    special_comm TEXT,
-    special_id TEXT,
-    interview_datetime TEXT,
-    interview_responsible TEXT,
-    acceptance_responsible TEXT,
-    passport_url TEXT,
-    license_url TEXT,
-    medcard_url TEXT,
-    submitted_by_role TEXT,
-    submitted_by_fio TEXT,
-    submitted_by_user_id INTEGER,
-    status TEXT DEFAULT 'pending',
-    reject_reason TEXT,
-    decided_by_role TEXT,
-    decided_by_fio TEXT,
-    decided_at TEXT,
-    discord_channel_id TEXT,
-    discord_message_id TEXT,
-    created_at TEXT NOT NULL
-  );
-`);
+async function initDB() {
+  await q(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      login TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      nickname TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'Сотрудник',
+      created_at TEXT NOT NULL
+    );
+  `);
+  await q(`
+    CREATE TABLE IF NOT EXISTS blacklist (
+      id SERIAL PRIMARY KEY,
+      fio TEXT NOT NULL,
+      fio_norm TEXT NOT NULL,
+      date_added TEXT NOT NULL,
+      date_until TEXT,
+      reason TEXT NOT NULL,
+      added_by_role TEXT NOT NULL,
+      added_by_fio TEXT NOT NULL,
+      added_by_user_id INTEGER,
+      removal_fee TEXT,
+      removal_action TEXT,
+      is_removed INTEGER DEFAULT 0,
+      removed_at TEXT,
+      removed_by_role TEXT,
+      removed_by_fio TEXT,
+      removed_by_user_id INTEGER,
+      is_amnestied INTEGER DEFAULT 0,
+      amnestied_at TEXT,
+      amnestied_by_role TEXT,
+      amnestied_by_fio TEXT,
+      amnestied_by_user_id INTEGER
+    );
+  `);
+  await q(`
+    CREATE TABLE IF NOT EXISTS applications (
+      id SERIAL PRIMARY KEY,
+      case_number TEXT NOT NULL,
+      fio TEXT NOT NULL,
+      fio_norm TEXT NOT NULL,
+      phone TEXT,
+      special_comm TEXT,
+      special_id TEXT,
+      interview_datetime TEXT,
+      interview_responsible TEXT,
+      acceptance_responsible TEXT,
+      passport_url TEXT,
+      license_url TEXT,
+      medcard_url TEXT,
+      submitted_by_role TEXT,
+      submitted_by_fio TEXT,
+      submitted_by_user_id INTEGER,
+      status TEXT DEFAULT 'pending',
+      reject_reason TEXT,
+      decided_by_role TEXT,
+      decided_by_fio TEXT,
+      decided_at TEXT,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+  // Файлы храним прямо в БД
+  await q(`
+    CREATE TABLE IF NOT EXISTS files (
+      id TEXT PRIMARY KEY,
+      mime TEXT NOT NULL,
+      data BYTEA NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  console.log('✅ БД готова');
+}
 
 // ─── HELPERS ────────────────────────────────
 const nowRu   = () => new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
 const safe    = v => (v && String(v).trim()) ? String(v).trim() : '—';
 const normFio = v => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-// Главное исправление — парсинг ФИО
-// Примеры ников:
-//   "Глав. Врач | Швец О. В."       → "Швец О. В."
-//   "[Зав. ОК] Иванов И.И."         → "Иванов И.И."
-//   "Зам. Зав. АБ | Петрова А.Б."   → "Петрова А.Б."
-//   "Сергеев А.Б."                  → "Сергеев А.Б."
 function extractFIO(nick) {
   let s = String(nick || '').trim();
-  // Убираем [что угодно]
   s = s.replace(/\[.*?\]\s*/g, '');
-  // Если есть разделитель | — берём то что после него
-  if (s.includes('|')) {
-    s = s.split('|').pop().trim();
-  }
-  // Если всё ещё начинается с должностных приставок типа "Глав. Врач", "Зав. ОК" и т.п.
-  // убираем всё до последней фамилии (ищем паттерн: Фамилия + инициалы)
-  const fioMatch = s.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.\s*)$/);
-  if (fioMatch) return fioMatch[1].trim();
-  const fioMatch2 = s.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.\s*)$/);
-  if (fioMatch2) return fioMatch2[1].trim();
-  // Полное ФИО: Иванов Иван Иванович
-  const fioFull = s.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s*$/);
-  if (fioFull) return fioFull[1].trim();
+  if (s.includes('|')) s = s.split('|').pop().trim();
+  const m1 = s.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.\s*)$/);
+  if (m1) return m1[1].trim();
+  const m2 = s.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.[А-ЯЁ]\.\s*)$/);
+  if (m2) return m2[1].trim();
+  const m3 = s.match(/([А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)\s*$/);
+  if (m3) return m3[1].trim();
   return s;
 }
 
-function nextCaseNumber() {
-  const row = db.prepare('SELECT id FROM applications ORDER BY id DESC LIMIT 1').get();
+async function nextCaseNumber() {
+  const row = await qOne('SELECT id FROM applications ORDER BY id DESC LIMIT 1');
   return 'ЛД-' + String((row?.id || 0) + 1).padStart(4, '0');
 }
 
@@ -169,26 +176,12 @@ function hasRole(member, allowed) {
 }
 
 function actorSnap(interaction) {
-  const display = interaction.member?.displayName
-    || interaction.user?.globalName
-    || interaction.user?.username || '?';
-  return {
-    role: getRoleLabel(interaction.member),
-    fio: extractFIO(display),
-    id: interaction.user.id
-  };
+  const display = interaction.member?.displayName || interaction.user?.globalName || interaction.user?.username || '?';
+  return { role: getRoleLabel(interaction.member), fio: extractFIO(display), id: interaction.user.id };
 }
 
-function statusColor(s) {
-  if (s === 'approved') return 0x00c853;
-  if (s === 'rejected') return 0xff4444;
-  return 0xff9800;
-}
-function statusLabel(s) {
-  if (s === 'approved') return '✅ Одобрено';
-  if (s === 'rejected') return '❌ Отклонено';
-  return '🟠 На рассмотрении';
-}
+function statusColor(s) { if (s==='approved') return 0x00c853; if (s==='rejected') return 0xff4444; return 0xff9800; }
+function statusLabel(s) { if (s==='approved') return '✅ Одобрено'; if (s==='rejected') return '❌ Отклонено'; return '🟠 На рассмотрении'; }
 
 function buildAppEmbed(a) {
   const docs = [
@@ -201,26 +194,29 @@ function buildAppEmbed(a) {
     .setTitle(`📋 ${safe(a.case_number)}`)
     .setColor(statusColor(a.status))
     .addFields(
-      { name: 'Статус',         value: statusLabel(a.status), inline: false },
-      { name: 'Ф.И.О.',         value: safe(a.fio),            inline: true },
-      { name: 'Телефон',        value: safe(a.phone),          inline: true },
-      { name: 'Спец. связь',    value: safe(a.special_comm),   inline: true },
-      { name: 'Спец. ID',       value: safe(a.special_id),     inline: true },
-      { name: 'Собеседование',  value: safe(a.interview_datetime), inline: false },
-      { name: 'Отв. собес.',    value: safe(a.interview_responsible), inline: true },
-      { name: 'Отв. принятие',  value: safe(a.acceptance_responsible), inline: true },
-      { name: 'Документы',      value: docs, inline: false },
-      { name: 'Подал',          value: `${safe(a.submitted_by_role)}, ${safe(a.submitted_by_fio)}`, inline: true },
-      { name: 'Создано',        value: safe(a.created_at), inline: true }
+      { name: 'Статус',        value: statusLabel(a.status), inline: false },
+      { name: 'Ф.И.О.',        value: safe(a.fio),            inline: true },
+      { name: 'Телефон',       value: safe(a.phone),          inline: true },
+      { name: 'Спец. связь',   value: safe(a.special_comm),   inline: true },
+      { name: 'Спец. ID',      value: safe(a.special_id),     inline: true },
+      { name: 'Собеседование', value: safe(a.interview_datetime), inline: false },
+      { name: 'Отв. собес.',   value: safe(a.interview_responsible), inline: true },
+      { name: 'Отв. принятие', value: safe(a.acceptance_responsible), inline: true },
+      { name: 'Документы',     value: docs, inline: false },
+      { name: 'Подал',         value: `${safe(a.submitted_by_role)}, ${safe(a.submitted_by_fio)}`, inline: true },
+      { name: 'Создано',       value: safe(a.created_at), inline: true }
     )
     .setTimestamp();
+
+  if (a.passport_url) embed.setImage(a.passport_url);
+  else if (a.license_url) embed.setImage(a.license_url);
+  else if (a.medcard_url) embed.setImage(a.medcard_url);
 
   if (a.status !== 'pending' && a.decided_by_role) {
     let dec = `${safe(a.decided_by_role)}, ${safe(a.decided_by_fio)}\n${safe(a.decided_at)}`;
     if (a.status === 'rejected' && a.reject_reason) dec += `\n**Причина:** ${a.reject_reason}`;
     embed.addFields({ name: 'Решение', value: dec, inline: false });
   }
-
   return embed;
 }
 
@@ -269,26 +265,26 @@ const slashDefs = [
   new SlashCommandBuilder().setName('bl-add').setDescription('Добавить в ЧС')
     .addStringOption(o => o.setName('fio').setDescription('Ф.И.О.').setRequired(true))
     .addStringOption(o => o.setName('reason').setDescription('Причина').setRequired(true))
-    .addStringOption(o => o.setName('date_until').setDescription('До какой даты').setRequired(false))
-    .addStringOption(o => o.setName('fee').setDescription('Сумма за вынос').setRequired(false))
-    .addStringOption(o => o.setName('action').setDescription('Действие для выноса').setRequired(false)),
+    .addStringOption(o => o.setName('date_until').setDescription('До').setRequired(false))
+    .addStringOption(o => o.setName('fee').setDescription('Сумма').setRequired(false))
+    .addStringOption(o => o.setName('action').setDescription('Действие').setRequired(false)),
   new SlashCommandBuilder().setName('bl-remove').setDescription('Снять ЧС')
-    .addIntegerOption(o => o.setName('id').setDescription('ID записи').setRequired(true)),
+    .addIntegerOption(o => o.setName('id').setDescription('ID').setRequired(true)),
   new SlashCommandBuilder().setName('bl-amnesty').setDescription('Амнистировать')
-    .addIntegerOption(o => o.setName('id').setDescription('ID записи').setRequired(true)),
+    .addIntegerOption(o => o.setName('id').setDescription('ID').setRequired(true)),
   new SlashCommandBuilder().setName('bl-find').setDescription('Поиск по ЧС')
-    .addStringOption(o => o.setName('fio').setDescription('Ф.И.О. или часть').setRequired(true)),
+    .addStringOption(o => o.setName('fio').setDescription('ФИО').setRequired(true)),
   new SlashCommandBuilder().setName('bl-list').setDescription('Активные записи ЧС'),
   new SlashCommandBuilder().setName('app-view').setDescription('Посмотреть анкету')
-    .addIntegerOption(o => o.setName('id').setDescription('ID анкеты').setRequired(true))
+    .addIntegerOption(o => o.setName('id').setDescription('ID').setRequired(true))
 ].map(c => c.toJSON());
 
 dc.once(Events.ClientReady, async () => {
-  console.log(`Discord: ${dc.user.tag}`);
+  console.log(`✅ Discord: ${dc.user.tag}`);
   try {
     const rest = new REST({ version: '10' }).setToken(DISCORD_TOKEN);
     await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body: slashDefs });
-    console.log('Discord: команды ОК');
+    console.log('✅ Slash-команды зарегистрированы');
   } catch (e) { console.error('Discord cmds:', e.message); }
 });
 
@@ -298,119 +294,111 @@ dc.on(Events.InteractionCreate, async interaction => {
       const cmd = interaction.commandName;
 
       if (cmd === 'bl-add') {
-        if (!hasRole(interaction.member, BL_ALLOWED_ROLES)) return interaction.reply({ content: '❌ Нет прав.', ephemeral: true });
+        if (!hasRole(interaction.member, BL_ALLOWED_ROLES)) return interaction.reply({ content:'❌ Нет прав.', ephemeral:true });
         const fio = interaction.options.getString('fio', true).trim();
         const reason = interaction.options.getString('reason', true).trim();
         const until = (interaction.options.getString('date_until') || '').trim();
         const fee = (interaction.options.getString('fee') || '').trim();
         const action = (interaction.options.getString('action') || '').trim();
         const actor = actorSnap(interaction);
-        const r = db.prepare('INSERT INTO blacklist (fio,fio_norm,date_added,date_until,reason,added_by_role,added_by_fio,removal_fee,removal_action) VALUES (?,?,?,?,?,?,?,?,?)').run(fio, normFio(fio), nowRu(), until, reason, actor.role, actor.fio, fee, action);
-        const row = db.prepare('SELECT * FROM blacklist WHERE id=?').get(r.lastInsertRowid);
+        const row = await qOne('INSERT INTO blacklist (fio,fio_norm,date_added,date_until,reason,added_by_role,added_by_fio,removal_fee,removal_action) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *', [fio, normFio(fio), nowRu(), until, reason, actor.role, actor.fio, fee, action]);
         await logBL('🚫 Добавление в ЧС', 0xff4444, row);
-        return interaction.reply({ content: `✅ ЧС создан. ID: **${row.id}**`, ephemeral: true });
+        return interaction.reply({ content:`✅ ЧС создан. ID: **${row.id}**`, ephemeral:true });
       }
 
       if (cmd === 'bl-remove') {
-        if (!hasRole(interaction.member, BL_ALLOWED_ROLES)) return interaction.reply({ content: '❌ Нет прав.', ephemeral: true });
+        if (!hasRole(interaction.member, BL_ALLOWED_ROLES)) return interaction.reply({ content:'❌ Нет прав.', ephemeral:true });
         const id = interaction.options.getInteger('id', true);
-        const row = db.prepare('SELECT * FROM blacklist WHERE id=?').get(id);
-        if (!row) return interaction.reply({ content: '❌ Не найдено.', ephemeral: true });
-        if (row.is_removed) return interaction.reply({ content: '❌ Уже снят.', ephemeral: true });
+        const row = await qOne('SELECT * FROM blacklist WHERE id=$1', [id]);
+        if (!row) return interaction.reply({ content:'❌ Не найдено.', ephemeral:true });
+        if (row.is_removed) return interaction.reply({ content:'❌ Уже снят.', ephemeral:true });
         const actor = actorSnap(interaction);
-        db.prepare('UPDATE blacklist SET is_removed=1,removed_at=?,removed_by_role=?,removed_by_fio=? WHERE id=?').run(nowRu(), actor.role, actor.fio, id);
-        const updated = db.prepare('SELECT * FROM blacklist WHERE id=?').get(id);
-        await logBL('✅ ЧС снят', 0x00c853, updated);
-        return interaction.reply({ content: `✅ Снят: **${updated.fio}**`, ephemeral: true });
+        const upd = await qOne('UPDATE blacklist SET is_removed=1,removed_at=$1,removed_by_role=$2,removed_by_fio=$3 WHERE id=$4 RETURNING *', [nowRu(), actor.role, actor.fio, id]);
+        await logBL('✅ ЧС снят', 0x00c853, upd);
+        return interaction.reply({ content:`✅ Снят: **${upd.fio}**`, ephemeral:true });
       }
 
       if (cmd === 'bl-amnesty') {
-        if (!hasRole(interaction.member, BL_ALLOWED_ROLES)) return interaction.reply({ content: '❌ Нет прав.', ephemeral: true });
+        if (!hasRole(interaction.member, BL_ALLOWED_ROLES)) return interaction.reply({ content:'❌ Нет прав.', ephemeral:true });
         const id = interaction.options.getInteger('id', true);
-        const row = db.prepare('SELECT * FROM blacklist WHERE id=?').get(id);
-        if (!row) return interaction.reply({ content: '❌ Не найдено.', ephemeral: true });
-        if (row.is_amnestied) return interaction.reply({ content: '❌ Уже амнистирован.', ephemeral: true });
+        const row = await qOne('SELECT * FROM blacklist WHERE id=$1', [id]);
+        if (!row) return interaction.reply({ content:'❌ Не найдено.', ephemeral:true });
+        if (row.is_amnestied) return interaction.reply({ content:'❌ Уже амнистирован.', ephemeral:true });
         const actor = actorSnap(interaction);
-        db.prepare('UPDATE blacklist SET is_amnestied=1,amnestied_at=?,amnestied_by_role=?,amnestied_by_fio=? WHERE id=?').run(nowRu(), actor.role, actor.fio, id);
-        const updated = db.prepare('SELECT * FROM blacklist WHERE id=?').get(id);
-        await logBL('🕊 Амнистия', 0x7c83ff, updated);
-        return interaction.reply({ content: `✅ Амнистия: **${updated.fio}**`, ephemeral: true });
+        const upd = await qOne('UPDATE blacklist SET is_amnestied=1,amnestied_at=$1,amnestied_by_role=$2,amnestied_by_fio=$3 WHERE id=$4 RETURNING *', [nowRu(), actor.role, actor.fio, id]);
+        await logBL('🕊 Амнистия', 0x7c83ff, upd);
+        return interaction.reply({ content:`✅ Амнистия: **${upd.fio}**`, ephemeral:true });
       }
 
       if (cmd === 'bl-find') {
-        const q = interaction.options.getString('fio', true).trim().toLowerCase();
-        const rows = db.prepare('SELECT * FROM blacklist WHERE fio_norm LIKE ? ORDER BY id DESC LIMIT 10').all(`%${q}%`);
-        if (!rows.length) return interaction.reply({ content: 'Ничего не найдено.', ephemeral: true });
-        const lines = rows.map(r => `**ID ${r.id}** | ${r.fio}\nПричина: ${r.reason}\nВнёс: ${r.added_by_role}, ${r.added_by_fio}\nСнят: ${r.is_removed ? 'Да' : 'Нет'} | Амнистия: ${r.is_amnestied ? 'Да' : 'Нет'}`).join('\n─────\n');
-        return interaction.reply({ content: lines.length > 1900 ? lines.slice(0, 1900) + '\n...' : lines, ephemeral: true });
+        const qStr = interaction.options.getString('fio', true).trim().toLowerCase();
+        const rows = await q('SELECT * FROM blacklist WHERE fio_norm LIKE $1 ORDER BY id DESC LIMIT 10', [`%${qStr}%`]);
+        if (!rows.length) return interaction.reply({ content:'Ничего не найдено.', ephemeral:true });
+        const lines = rows.map(r => `**ID ${r.id}** | ${r.fio}\nПричина: ${r.reason}\nВнёс: ${r.added_by_role}, ${r.added_by_fio}\nСнят: ${r.is_removed?'Да':'Нет'} | Амн.: ${r.is_amnestied?'Да':'Нет'}`).join('\n─────\n');
+        return interaction.reply({ content: lines.length>1900?lines.slice(0,1900)+'\n...':lines, ephemeral:true });
       }
 
       if (cmd === 'bl-list') {
-        const rows = db.prepare('SELECT * FROM blacklist WHERE is_removed=0 AND is_amnestied=0 ORDER BY id DESC LIMIT 10').all();
-        if (!rows.length) return interaction.reply({ content: 'ЧС пуст.', ephemeral: true });
+        const rows = await q('SELECT * FROM blacklist WHERE is_removed=0 AND is_amnestied=0 ORDER BY id DESC LIMIT 10');
+        if (!rows.length) return interaction.reply({ content:'ЧС пуст.', ephemeral:true });
         const lines = rows.map(r => `**ID ${r.id}** | ${r.fio}\nПричина: ${r.reason} | До: ${safe(r.date_until)}`).join('\n─────\n');
-        return interaction.reply({ content: lines, ephemeral: true });
+        return interaction.reply({ content: lines, ephemeral:true });
       }
 
       if (cmd === 'app-view') {
         const id = interaction.options.getInteger('id', true);
-        const row = db.prepare('SELECT * FROM applications WHERE id=?').get(id);
-        if (!row) return interaction.reply({ content: '❌ Не найдена.', ephemeral: true });
-        return interaction.reply({ embeds: [buildAppEmbed(row)], ephemeral: true });
+        const row = await qOne('SELECT * FROM applications WHERE id=$1', [id]);
+        if (!row) return interaction.reply({ content:'❌ Не найдена.', ephemeral:true });
+        return interaction.reply({ embeds:[buildAppEmbed(row)], ephemeral:true });
       }
     }
 
-    // ── BUTTONS ──
     if (interaction.isButton()) {
       const [ns, action, rawId] = interaction.customId.split(':');
       if (ns !== 'app') return;
       const appId = Number(rawId);
-      const row = db.prepare('SELECT * FROM applications WHERE id=?').get(appId);
-      if (!row) return interaction.reply({ content: '❌ Не найдена.', ephemeral: true });
-      if (!hasRole(interaction.member, APP_DECISION_ROLES)) return interaction.reply({ content: '❌ Нет прав. Нужна роль Зав.ОК или Зам.Зав.ОК.', ephemeral: true });
-      if (row.status !== 'pending') return interaction.reply({ content: '❌ Решение уже принято.', ephemeral: true });
+      const row = await qOne('SELECT * FROM applications WHERE id=$1', [appId]);
+      if (!row) return interaction.reply({ content:'❌ Не найдена.', ephemeral:true });
+      if (!hasRole(interaction.member, APP_DECISION_ROLES)) return interaction.reply({ content:'❌ Нет прав.', ephemeral:true });
+      if (row.status !== 'pending') return interaction.reply({ content:'❌ Уже решено.', ephemeral:true });
 
       if (action === 'approve') {
         const actor = actorSnap(interaction);
-        const res = db.prepare('UPDATE applications SET status=\'approved\',reject_reason=\'\',decided_by_role=?,decided_by_fio=?,decided_at=? WHERE id=? AND status=\'pending\'').run(actor.role, actor.fio, nowRu(), appId);
-        if (!res.changes) return interaction.reply({ content: '❌ Уже решено.', ephemeral: true });
-        const updated = db.prepare('SELECT * FROM applications WHERE id=?').get(appId);
-        await syncAppMsg(updated);
-        return interaction.reply({ content: `✅ **${updated.case_number}** одобрена.`, ephemeral: true });
+        const upd = await qOne(`UPDATE applications SET status='approved', reject_reason='', decided_by_role=$1, decided_by_fio=$2, decided_at=$3 WHERE id=$4 AND status='pending' RETURNING *`, [actor.role, actor.fio, nowRu(), appId]);
+        if (!upd) return interaction.reply({ content:'❌ Уже решено.', ephemeral:true });
+        await syncAppMsg(upd);
+        return interaction.reply({ content:`✅ **${upd.case_number}** одобрена.`, ephemeral:true });
       }
 
       if (action === 'reject') {
         const modal = new ModalBuilder().setCustomId(`modal:reject:${appId}`).setTitle('Причина отказа');
         modal.addComponents(new ActionRowBuilder().addComponents(
-          new TextInputBuilder().setCustomId('reason').setLabel('Укажите причину').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
+          new TextInputBuilder().setCustomId('reason').setLabel('Причина').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(1000)
         ));
         return interaction.showModal(modal);
       }
     }
 
-    // ── MODAL ──
     if (interaction.isModalSubmit()) {
       const [ns, action, rawId] = interaction.customId.split(':');
       if (ns !== 'modal' || action !== 'reject') return;
       const appId = Number(rawId);
-      const row = db.prepare('SELECT * FROM applications WHERE id=?').get(appId);
-      if (!row) return interaction.reply({ content: '❌ Не найдена.', ephemeral: true });
-      if (!hasRole(interaction.member, APP_DECISION_ROLES)) return interaction.reply({ content: '❌ Нет прав.', ephemeral: true });
-      if (row.status !== 'pending') return interaction.reply({ content: '❌ Решение уже принято.', ephemeral: true });
+      const row = await qOne('SELECT * FROM applications WHERE id=$1', [appId]);
+      if (!row) return interaction.reply({ content:'❌ Не найдена.', ephemeral:true });
+      if (!hasRole(interaction.member, APP_DECISION_ROLES)) return interaction.reply({ content:'❌ Нет прав.', ephemeral:true });
+      if (row.status !== 'pending') return interaction.reply({ content:'❌ Уже решено.', ephemeral:true });
       const reason = interaction.fields.getTextInputValue('reason').trim();
       const actor = actorSnap(interaction);
-      const res = db.prepare('UPDATE applications SET status=\'rejected\',reject_reason=?,decided_by_role=?,decided_by_fio=?,decided_at=? WHERE id=? AND status=\'pending\'').run(reason, actor.role, actor.fio, nowRu(), appId);
-      if (!res.changes) return interaction.reply({ content: '❌ Уже решено.', ephemeral: true });
-      const updated = db.prepare('SELECT * FROM applications WHERE id=?').get(appId);
-      await syncAppMsg(updated);
-      return interaction.reply({ content: `❌ **${updated.case_number}** отклонена.`, ephemeral: true });
+      const upd = await qOne(`UPDATE applications SET status='rejected', reject_reason=$1, decided_by_role=$2, decided_by_fio=$3, decided_at=$4 WHERE id=$5 AND status='pending' RETURNING *`, [reason, actor.role, actor.fio, nowRu(), appId]);
+      if (!upd) return interaction.reply({ content:'❌ Уже решено.', ephemeral:true });
+      await syncAppMsg(upd);
+      return interaction.reply({ content:`❌ **${upd.case_number}** отклонена.`, ephemeral:true });
     }
-
   } catch (e) {
     console.error('interaction error:', e);
     try {
-      if (interaction.replied || interaction.deferred) await interaction.followUp({ content: '⚠️ Ошибка.', ephemeral: true });
-      else await interaction.reply({ content: '⚠️ Ошибка.', ephemeral: true });
+      if (interaction.replied || interaction.deferred) await interaction.followUp({ content:'⚠️ Ошибка.', ephemeral:true });
+      else await interaction.reply({ content:'⚠️ Ошибка.', ephemeral:true });
     } catch {}
   }
 });
@@ -418,26 +406,28 @@ dc.on(Events.InteractionCreate, async interaction => {
 // ─── EXPRESS ────────────────────────────────
 const app = express();
 app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use(cookieParser());
 app.use(express.static('public'));
-app.use('/uploads', express.static('uploads'));
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 function authMW(req, res, next) {
   const token = req.cookies?.token || (req.headers.authorization || '').replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Не авторизован' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = db.prepare('SELECT * FROM users WHERE id=?').get(decoded.id);
-    if (!user) return res.status(401).json({ error: 'Не найден' });
-    req.user = user;
-    next();
-  } catch { return res.status(401).json({ error: 'Невалидный токен' }); }
+    qOne('SELECT * FROM users WHERE id=$1', [decoded.id]).then(user => {
+      if (!user) return res.status(401).json({ error:'Не найден' });
+      req.user = user;
+      next();
+    }).catch(() => res.status(500).json({ error:'DB err' }));
+  } catch { return res.status(401).json({ error:'Невалидный токен' }); }
 }
 
 function requireRoles(roles) {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'Нет прав' });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error:'Нет прав' });
     next();
   };
 }
@@ -445,121 +435,154 @@ function requireRoles(roles) {
 const SITE_BL_ROLES = ['Заведующий ОК','Заместитель Заведующего ОК','Заведующий АБ','Заместитель Заведующего АБ','Заместитель Главного Врача','Главный Врач'];
 const SITE_OK_ROLES = ['Заведующий ОК','Заместитель Заведующего ОК'];
 
-// ── AUTH ROUTES ──
-app.post('/api/register', (req, res) => {
-  const { login, password, nickname, role } = req.body;
-  if (!login || !password || !nickname) return res.status(400).json({ error: 'Заполни все поля' });
-  if (db.prepare('SELECT id FROM users WHERE login=?').get(login)) return res.status(400).json({ error: 'Логин занят' });
-  const hash = bcrypt.hashSync(password, 10);
-  const r = db.prepare('INSERT INTO users (login,password,nickname,role,created_at) VALUES (?,?,?,?,?)').run(login, hash, nickname, role || 'Сотрудник', nowRu());
-  const token = jwt.sign({ id: r.lastInsertRowid }, JWT_SECRET, { expiresIn: '30d' });
-  res.cookie('token', token, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000 });
-  res.json({ success: true });
+// AUTH
+app.post('/api/register', async (req, res) => {
+  try {
+    const { login, password, nickname, role } = req.body;
+    if (!login || !password || !nickname) return res.status(400).json({ error:'Заполни все поля' });
+    const exists = await qOne('SELECT id FROM users WHERE login=$1', [login]);
+    if (exists) return res.status(400).json({ error:'Логин занят' });
+    const hash = bcrypt.hashSync(password, 10);
+    const u = await qOne('INSERT INTO users (login,password,nickname,role,created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id', [login, hash, nickname, role || 'Сотрудник', nowRu()]);
+    const token = jwt.sign({ id: u.id }, JWT_SECRET, { expiresIn:'30d' });
+    res.cookie('token', token, { httpOnly:true, maxAge:30*24*3600*1000, sameSite:'lax' });
+    res.json({ success:true });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-app.post('/api/login', (req, res) => {
-  const { login, password } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE login=?').get(login);
-  if (!user || !bcrypt.compareSync(password, user.password)) return res.status(400).json({ error: 'Неверный логин или пароль' });
-  const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: '30d' });
-  res.cookie('token', token, { httpOnly: true, maxAge: 30 * 24 * 3600 * 1000 });
-  res.json({ success: true });
+app.post('/api/login', async (req, res) => {
+  try {
+    const { login, password } = req.body;
+    const user = await qOne('SELECT * FROM users WHERE login=$1', [login]);
+    if (!user || !bcrypt.compareSync(password, user.password)) return res.status(400).json({ error:'Неверный логин или пароль' });
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn:'30d' });
+    res.cookie('token', token, { httpOnly:true, maxAge:30*24*3600*1000, sameSite:'lax' });
+    res.json({ success:true });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-app.post('/api/logout', (_req, res) => { res.clearCookie('token'); res.json({ success: true }); });
-app.get('/api/me', authMW, (req, res) => { const { password: _, ...u } = req.user; res.json(u); });
+app.post('/api/logout', (_req, res) => { res.clearCookie('token'); res.json({ success:true }); });
+app.get('/api/me', authMW, (req, res) => { const { password:_, ...u } = req.user; res.json(u); });
 
-// ── BLACKLIST ROUTES ──
-app.get('/api/blacklist', authMW, (_req, res) => res.json(db.prepare('SELECT * FROM blacklist ORDER BY id DESC').all()));
-
-app.post('/api/blacklist', authMW, requireRoles(SITE_BL_ROLES), (req, res) => {
-  const { fio, date_until, reason, removal_fee, removal_action } = req.body;
-  if (!fio || !reason) return res.status(400).json({ error: 'ФИО и причина обязательны' });
-  const uf = extractFIO(req.user.nickname);
-  const r = db.prepare('INSERT INTO blacklist (fio,fio_norm,date_added,date_until,reason,added_by_role,added_by_fio,added_by_user_id,removal_fee,removal_action) VALUES (?,?,?,?,?,?,?,?,?,?)').run(fio, normFio(fio), nowRu(), date_until || '', reason, req.user.role, uf, req.user.id, removal_fee || '', removal_action || '');
-  const row = db.prepare('SELECT * FROM blacklist WHERE id=?').get(r.lastInsertRowid);
-  logBL('🚫 ЧС (сайт)', 0xff4444, row).catch(() => {});
-  res.json({ success: true, id: row.id });
+// BL
+app.get('/api/blacklist', authMW, async (_req, res) => {
+  const rows = await q('SELECT * FROM blacklist ORDER BY id DESC');
+  res.json(rows);
 });
 
-app.put('/api/blacklist/:id/remove', authMW, requireRoles(SITE_BL_ROLES), (req, res) => {
-  const row = db.prepare('SELECT * FROM blacklist WHERE id=?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Не найдено' });
-  if (row.is_removed) return res.status(400).json({ error: 'Уже снят' });
-  const uf = extractFIO(req.user.nickname);
-  db.prepare('UPDATE blacklist SET is_removed=1,removed_at=?,removed_by_role=?,removed_by_fio=?,removed_by_user_id=? WHERE id=?').run(nowRu(), req.user.role, uf, req.user.id, req.params.id);
-  const updated = db.prepare('SELECT * FROM blacklist WHERE id=?').get(req.params.id);
-  logBL('✅ ЧС снят (сайт)', 0x00c853, updated).catch(() => {});
-  res.json({ success: true });
+app.post('/api/blacklist', authMW, requireRoles(SITE_BL_ROLES), async (req, res) => {
+  try {
+    const { fio, date_until, reason, removal_fee, removal_action } = req.body;
+    if (!fio || !reason) return res.status(400).json({ error:'ФИО и причина обязательны' });
+    const uf = extractFIO(req.user.nickname);
+    const row = await qOne('INSERT INTO blacklist (fio,fio_norm,date_added,date_until,reason,added_by_role,added_by_fio,added_by_user_id,removal_fee,removal_action) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *', [fio, normFio(fio), nowRu(), date_until||'', reason, req.user.role, uf, req.user.id, removal_fee||'', removal_action||'']);
+    logBL('🚫 ЧС (сайт)', 0xff4444, row).catch(()=>{});
+    res.json({ success:true, id: row.id });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-app.put('/api/blacklist/:id/amnesty', authMW, requireRoles(SITE_BL_ROLES), (req, res) => {
-  const row = db.prepare('SELECT * FROM blacklist WHERE id=?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Не найдено' });
-  if (row.is_amnestied) return res.status(400).json({ error: 'Уже амнистирован' });
-  const uf = extractFIO(req.user.nickname);
-  db.prepare('UPDATE blacklist SET is_amnestied=1,amnestied_at=?,amnestied_by_role=?,amnestied_by_fio=?,amnestied_by_user_id=? WHERE id=?').run(nowRu(), req.user.role, uf, req.user.id, req.params.id);
-  const updated = db.prepare('SELECT * FROM blacklist WHERE id=?').get(req.params.id);
-  logBL('🕊 Амнистия (сайт)', 0x7c83ff, updated).catch(() => {});
-  res.json({ success: true });
+app.put('/api/blacklist/:id/remove', authMW, requireRoles(SITE_BL_ROLES), async (req, res) => {
+  try {
+    const row = await qOne('SELECT * FROM blacklist WHERE id=$1', [req.params.id]);
+    if (!row) return res.status(404).json({ error:'Не найдено' });
+    if (row.is_removed) return res.status(400).json({ error:'Уже снят' });
+    const uf = extractFIO(req.user.nickname);
+    const upd = await qOne('UPDATE blacklist SET is_removed=1,removed_at=$1,removed_by_role=$2,removed_by_fio=$3,removed_by_user_id=$4 WHERE id=$5 RETURNING *', [nowRu(), req.user.role, uf, req.user.id, req.params.id]);
+    logBL('✅ ЧС снят (сайт)', 0x00c853, upd).catch(()=>{});
+    res.json({ success:true });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-// ── FILE UPLOAD ──
-app.post('/api/upload', authMW, upload.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Файл не загружен' });
-  res.json({ url: `${BASE_URL}/uploads/${req.file.filename}` });
+app.put('/api/blacklist/:id/amnesty', authMW, requireRoles(SITE_BL_ROLES), async (req, res) => {
+  try {
+    const row = await qOne('SELECT * FROM blacklist WHERE id=$1', [req.params.id]);
+    if (!row) return res.status(404).json({ error:'Не найдено' });
+    if (row.is_amnestied) return res.status(400).json({ error:'Уже амнистирован' });
+    const uf = extractFIO(req.user.nickname);
+    const upd = await qOne('UPDATE blacklist SET is_amnestied=1,amnestied_at=$1,amnestied_by_role=$2,amnestied_by_fio=$3,amnestied_by_user_id=$4 WHERE id=$5 RETURNING *', [nowRu(), req.user.role, uf, req.user.id, req.params.id]);
+    logBL('🕊 Амнистия (сайт)', 0x7c83ff, upd).catch(()=>{});
+    res.json({ success:true });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-// ── APPLICATIONS ──
-app.get('/api/applications', authMW, (_req, res) => res.json(db.prepare('SELECT * FROM applications ORDER BY id DESC').all()));
+// ФАЙЛЫ В БД
+app.post('/api/upload', authMW, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error:'Файл не загружен' });
+    const id = crypto.randomBytes(12).toString('hex');
+    await q('INSERT INTO files (id,mime,data,created_at) VALUES ($1,$2,$3,$4)', [id, req.file.mimetype, req.file.buffer, nowRu()]);
+    res.json({ url: `${BASE_URL}/file/${id}` });
+  } catch (e) {
+    console.error('upload:', e);
+    res.status(500).json({ error:'Ошибка загрузки файла' });
+  }
+});
+
+// Отдача файлов из БД (публично, чтобы Discord мог их читать)
+app.get('/file/:id', async (req, res) => {
+  try {
+    const row = await qOne('SELECT mime, data FROM files WHERE id=$1', [req.params.id]);
+    if (!row) return res.status(404).send('Not found');
+    res.set('Content-Type', row.mime);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(row.data);
+  } catch (e) { res.status(500).send('Error'); }
+});
+
+// APPLICATIONS
+app.get('/api/applications', authMW, async (_req, res) => {
+  const rows = await q('SELECT * FROM applications ORDER BY id DESC');
+  res.json(rows);
+});
 
 app.post('/api/applications', authMW, async (req, res) => {
-  const { fio, phone, special_comm, special_id, interview_datetime, interview_responsible, acceptance_responsible, passport_url, license_url, medcard_url } = req.body;
-  if (!fio || !String(fio).trim()) return res.status(400).json({ error: 'ФИО обязательно' });
+  try {
+    const { fio, phone, special_comm, special_id, interview_datetime, interview_responsible, acceptance_responsible, passport_url, license_url, medcard_url } = req.body;
+    if (!fio || !String(fio).trim()) return res.status(400).json({ error:'ФИО обязательно' });
 
-  const bl = db.prepare('SELECT * FROM blacklist WHERE fio_norm=? AND is_removed=0 AND is_amnestied=0 ORDER BY id DESC LIMIT 1').get(normFio(fio));
-  if (bl) return res.status(400).json({ error: `Данный гражданин в ЧС: "${bl.reason}" до ${bl.date_until || 'бессрочно'}. Заносил: ${bl.added_by_role}, ${bl.added_by_fio}`, blacklisted: true });
+    const bl = await qOne('SELECT * FROM blacklist WHERE fio_norm=$1 AND is_removed=0 AND is_amnestied=0 ORDER BY id DESC LIMIT 1', [normFio(fio)]);
+    if (bl) return res.status(400).json({ error: `Данный гражданин в ЧС: "${bl.reason}" до ${bl.date_until || 'бессрочно'}. Заносил: ${bl.added_by_role}, ${bl.added_by_fio}`, blacklisted:true });
 
-  const uf = extractFIO(req.user.nickname);
-  const cn = nextCaseNumber();
-  const ca = nowRu();
+    const uf = extractFIO(req.user.nickname);
+    const cn = await nextCaseNumber();
+    const appRow = await qOne('INSERT INTO applications (case_number,fio,fio_norm,phone,special_comm,special_id,interview_datetime,interview_responsible,acceptance_responsible,passport_url,license_url,medcard_url,submitted_by_role,submitted_by_fio,submitted_by_user_id,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *', [cn, String(fio).trim(), normFio(fio), phone||'', special_comm||'', special_id||'', interview_datetime||'', interview_responsible||'', acceptance_responsible||'', passport_url||'', license_url||'', medcard_url||'', req.user.role, uf, req.user.id, nowRu()]);
 
-  const r = db.prepare('INSERT INTO applications (case_number,fio,fio_norm,phone,special_comm,special_id,interview_datetime,interview_responsible,acceptance_responsible,passport_url,license_url,medcard_url,submitted_by_role,submitted_by_fio,submitted_by_user_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(cn, String(fio).trim(), normFio(fio), phone || '', special_comm || '', special_id || '', interview_datetime || '', interview_responsible || '', acceptance_responsible || '', passport_url || '', license_url || '', medcard_url || '', req.user.role, uf, req.user.id, ca);
+    if (dc.isReady() && APPLICATIONS_CHANNEL_ID) {
+      try {
+        const ch = await dc.channels.fetch(APPLICATIONS_CHANNEL_ID);
+        const msg = await ch.send({ embeds:[buildAppEmbed(appRow)], components:buildAppButtons(appRow) });
+        await q('UPDATE applications SET discord_channel_id=$1, discord_message_id=$2 WHERE id=$3', [msg.channelId, msg.id, appRow.id]);
+      } catch (e) { console.error('discord send:', e.message); }
+    }
 
-  const appRow = db.prepare('SELECT * FROM applications WHERE id=?').get(r.lastInsertRowid);
-
-  if (dc.isReady() && APPLICATIONS_CHANNEL_ID) {
-    try {
-      const ch = await dc.channels.fetch(APPLICATIONS_CHANNEL_ID);
-      const msg = await ch.send({ embeds: [buildAppEmbed(appRow)], components: buildAppButtons(appRow) });
-      db.prepare('UPDATE applications SET discord_channel_id=?,discord_message_id=? WHERE id=?').run(msg.channelId, msg.id, appRow.id);
-    } catch (e) { console.error('discord send:', e.message); }
-  }
-
-  res.json({ success: true, id: appRow.id, case_number: cn });
+    res.json({ success:true, id: appRow.id, case_number: cn });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-// ── ОДОБРЕНИЕ / ОТКАЗ С САЙТА ──
 app.put('/api/applications/:id/decide', authMW, requireRoles(SITE_OK_ROLES), async (req, res) => {
-  const { decision, reject_reason } = req.body;
-  const row = db.prepare('SELECT * FROM applications WHERE id=?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Не найдена' });
-  if (row.status !== 'pending') return res.status(400).json({ error: 'Решение уже принято' });
-
-  const uf = extractFIO(req.user.nickname);
-  const now = nowRu();
-
-  db.prepare('UPDATE applications SET status=?,reject_reason=?,decided_by_role=?,decided_by_fio=?,decided_at=? WHERE id=?').run(decision, reject_reason || '', req.user.role, uf, now, req.params.id);
-
-  const updated = db.prepare('SELECT * FROM applications WHERE id=?').get(req.params.id);
-  await syncAppMsg(updated);
-  res.json({ success: true });
+  try {
+    const { decision, reject_reason } = req.body;
+    const row = await qOne('SELECT * FROM applications WHERE id=$1', [req.params.id]);
+    if (!row) return res.status(404).json({ error:'Не найдена' });
+    if (row.status !== 'pending') return res.status(400).json({ error:'Решение уже принято' });
+    const uf = extractFIO(req.user.nickname);
+    const upd = await qOne('UPDATE applications SET status=$1, reject_reason=$2, decided_by_role=$3, decided_by_fio=$4, decided_at=$5 WHERE id=$6 RETURNING *', [decision, reject_reason||'', req.user.role, uf, nowRu(), req.params.id]);
+    await syncAppMsg(upd);
+    res.json({ success:true });
+  } catch (e) { console.error(e); res.status(500).json({ error:'Ошибка' }); }
 });
 
-// ── HEALTH ──
-app.get('/health', (_req, res) => res.json({ ok: true, discord: dc.isReady() ? 'online' : 'offline' }));
+app.get('/health', (_req, res) => res.json({ ok:true, discord: dc.isReady() ? 'online' : 'offline' }));
 
 // ─── START ──────────────────────────────────
-app.listen(PORT, () => console.log(`HTTP: порт ${PORT}`));
-if (!DISCORD_TOKEN) { console.error('Нет DISCORD_TOKEN'); }
-else { dc.login(DISCORD_TOKEN).catch(e => console.error('DC login:', e.message)); }
+(async () => {
+  try {
+    await initDB();
+    app.listen(PORT, () => console.log(`✅ HTTP: порт ${PORT}`));
+    if (!DISCORD_TOKEN) console.error('⚠️  Нет DISCORD_TOKEN');
+    else await dc.login(DISCORD_TOKEN);
+  } catch (e) {
+    console.error('❌ Ошибка старта:', e);
+    process.exit(1);
+  }
+})();
